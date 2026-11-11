@@ -14,6 +14,12 @@ class WorkspaceManager(private val root: File) {
 
     /** Resolves [relativePath] and verifies it stays inside the workspace root. */
     fun resolve(relativePath: String): File {
+        // Reject absolute inputs up front: java.io.File on Unix would otherwise
+        // concatenate root + absolute child, and normalize() would land back
+        // inside the root instead of flagging the escape.
+        require(!File(relativePath).toPath().isAbsolute) {
+            "Path must be relative to the workspace root: $relativePath"
+        }
         val canonicalRoot = root.canonicalFile.toPath()
         val target = File(root, relativePath).absoluteFile.toPath().normalize()
         require(target == canonicalRoot || target.startsWith(canonicalRoot)) {
