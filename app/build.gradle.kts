@@ -11,8 +11,8 @@ android {
         applicationId = "ru.slicoo.code_droid"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.3.0"
     }
 
     buildTypes {
@@ -33,9 +33,11 @@ android {
 dependencies {
     implementation(project(":core:ui"))
     implementation(project(":core:data"))
+    implementation(project(":core:workspace"))
     implementation(project(":feature:chat"))
     implementation(project(":feature:onboarding"))
     implementation(project(":feature:settings"))
+    implementation(project(":feature:workspace"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

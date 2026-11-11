@@ -42,6 +42,7 @@ import ru.slicoo.code_droid.core.model.Role
 fun ChatRoute(
     viewModel: ChatViewModel,
     onEnterKey: () -> Unit,
+    onOpenWorkspace: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
@@ -52,11 +53,20 @@ fun ChatRoute(
         if (last > 0) listState.animateScrollToItem(last - 1)
     }
 
+    // Re-read config labels every time the screen re-enters composition
+    // (e.g. after picking a workspace or saving settings).
+    LaunchedEffect(Unit) {
+        viewModel.refresh()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Code Droid") },
                 actions = {
+                    TextButton(onClick = onOpenWorkspace) {
+                        Text(state.workspaceLabel ?: "Папка")
+                    }
                     TextButton(onClick = onEnterKey) { Text("Настройки") }
                 },
             )
@@ -75,6 +85,14 @@ fun ChatRoute(
             state.modelLabel?.let { label ->
                 Text(
                     label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                )
+            }
+            state.workspaceLabel?.let { label ->
+                Text(
+                    "Папка: $label",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
@@ -108,6 +126,14 @@ fun ChatScreen(
             items(state.messages, key = { it.id }) { message ->
                 MessageBubble(message)
             }
+            if (state.toolEvents.isNotEmpty()) {
+                items(
+                    state.toolEvents,
+                    key = { it.hashCode() },
+                ) { toolEvent ->
+                    ToolEventRow(toolEvent)
+                }
+            }
             if (state.streamingText != null) {
                 item(key = "streaming") {
                     Surface(
@@ -116,7 +142,7 @@ fun ChatScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
-                            state.streamingText ?: "",
+                            state.streamingText.orEmpty(),
                             style = MaterialTheme.typography.bodyLarge,
                             modifier = Modifier.padding(12.dp),
                         )
@@ -126,7 +152,7 @@ fun ChatScreen(
             if (state.error != null) {
                 item(key = "error") {
                     ErrorPanel(
-                        message = state.error ?: "",
+                        message = state.error.orEmpty(),
                         needsKey = state.needsKey,
                         onDismissError = onDismissError,
                         onEnterKey = onEnterKey,
@@ -163,6 +189,29 @@ fun ChatScreen(
                     Text("→")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ToolEventRow(toolEvent: ToolEventUi) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(0.85f),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(
+                text = if (toolEvent.isRunning) "⏳ ${toolEvent.name}" else "✓ ${toolEvent.name}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = toolEvent.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+            )
         }
     }
 }

@@ -85,4 +85,86 @@ class OpenAiWireTest {
         assertEquals("tool", OpenAiWire.wireRole(Role.TOOL))
         assertEquals("system", OpenAiWire.wireRole(Role.SYSTEM))
     }
+
+    @Test
+    fun encodesToolsInRequest() {
+        val request = LlmRequest(
+            model = "m",
+            messages = listOf(
+                Message(
+                    id = "1",
+                    role = Role.USER,
+                    parts = listOf(MessagePart.Text("hi")),
+                    createdAt = 0L,
+                ),
+            ),
+            tools = listOf(
+                ToolSpec(
+                    name = "read",
+                    description = "Read a file",
+                    parameters = kotlinx.serialization.json.buildJsonObject {
+                        put("type", kotlinx.serialization.json.JsonPrimitive("object"))
+                    },
+                ),
+            ),
+        )
+        val encoded = OpenAiWire.json.encodeToString(
+            OpenAiWire.ChatRequest.serializer(),
+            OpenAiWire.encodeChatRequest(request),
+        )
+        assertTrue(encoded.contains("\"tools\":["))
+        assertTrue(encoded.contains("\"name\":\"read\""))
+    }
+
+    @Test
+    fun assistantToolCallMessageEncodesToolCalls() {
+        val message = Message(
+            id = "2",
+            role = Role.ASSISTANT,
+            parts = listOf(
+                MessagePart.Text("сейчас"),
+                MessagePart.ToolCall("call-1", "read", """{"path":"a.txt"}"""),
+            ),
+            createdAt = 0L,
+        )
+        val encoded = OpenAiWire.json.encodeToString(
+            OpenAiWire.WireMessage.serializer(),
+            OpenAiWire.toWire(message),
+        )
+        assertTrue(encoded.contains("\"tool_calls\":["))
+        assertTrue(encoded.contains("\"id\":\"call-1\""))
+        assertTrue(encoded.contains("\"name\":\"read\""))
+    }
+
+    @Test
+    fun toolResultMessageEncodesToolRole() {
+        val message = Message(
+            id = "3",
+            role = Role.TOOL,
+            parts = listOf(MessagePart.ToolResult("call-1", "file content", false)),
+            createdAt = 0L,
+        )
+        val encoded = OpenAiWire.json.encodeToString(
+            OpenAiWire.WireMessage.serializer(),
+            OpenAiWire.toWire(message),
+        )
+        assertTrue(encoded.contains("\"role\":\"tool\""))
+        assertTrue(encoded.contains("\"tool_call_id\":\"call-1\""))
+        assertTrue(encoded.contains("\"content\":\"file content\""))
+    }
+
+    @Test
+    fun decodesFragmentedToolCallChunks() {
+        val first = OpenAiWire.decodeChunk(
+            """{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read"}}]}}]}""",
+        )
+        val second = OpenAiWire.decodeChunk(
+            """{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\""}}]}}]}""",
+        )
+        assertEquals("call-1", first?.choices?.first()?.delta?.toolCalls?.first()?.id)
+        assertEquals("read", first?.choices?.first()?.delta?.toolCalls?.first()?.function?.name)
+        // The arguments field is a JSON string; after decoding, the raw
+        // fragment of the tool-call arguments is visible.
+        assertEquals("{\"path\"", second?.choices?.first()?.delta?.toolCalls?.first()?.function?.arguments)
+    }
 }

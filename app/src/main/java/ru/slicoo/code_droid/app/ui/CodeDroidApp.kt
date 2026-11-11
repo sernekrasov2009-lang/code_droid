@@ -10,15 +10,19 @@ import ru.slicoo.code_droid.core.ui.navigation.Routes
 import ru.slicoo.code_droid.core.ui.theme.CodeDroidTheme
 import ru.slicoo.code_droid.core.data.AppConfigRepository
 import ru.slicoo.code_droid.core.data.ChatConfig
+import ru.slicoo.code_droid.core.data.WorkspaceRepository
 import ru.slicoo.code_droid.feature.chat.ChatViewModel
 import ru.slicoo.code_droid.feature.chat.ChatRoute
 import ru.slicoo.code_droid.feature.onboarding.OnboardingViewModel
 import ru.slicoo.code_droid.feature.onboarding.OnboardingRoute
 import ru.slicoo.code_droid.feature.settings.SettingsViewModel
 import ru.slicoo.code_droid.feature.settings.SettingsRoute
+import ru.slicoo.code_droid.feature.workspace.WorkspaceRoute
+import ru.slicoo.code_droid.feature.workspace.WorkspaceViewModel
 
 private class AppGraph(
     val chatConfig: ChatConfig,
+    val workspaceRepository: WorkspaceRepository,
     val chatViewModelCreator: () -> ChatViewModel,
     val onboardingViewModelCreator: () -> OnboardingViewModel,
     val settingsViewModelCreator: () -> SettingsViewModel,
@@ -32,9 +36,16 @@ fun CodeDroidApp() {
         val graph = remember(context) {
             val repository = AppConfigRepository(context)
             val chatConfig = ChatConfig(repository)
+            val workspaceRepository = WorkspaceRepository(context, repository)
             AppGraph(
                 chatConfig = chatConfig,
-                chatViewModelCreator = { ChatViewModel(chatConfig) },
+                workspaceRepository = workspaceRepository,
+                chatViewModelCreator = {
+                    ChatViewModel(
+                        chatConfig = chatConfig,
+                        workspaceProvider = { workspaceRepository.workspaceManager() },
+                    )
+                },
                 onboardingViewModelCreator = { OnboardingViewModel(repository, chatConfig) },
                 settingsViewModelCreator = { SettingsViewModel(repository, chatConfig) },
                 isConfigured = chatConfig.activeSetup() != null,
@@ -52,6 +63,15 @@ fun CodeDroidApp() {
                     onEnterKey = {
                         navController.navigate(Routes.SETTINGS)
                     },
+                    onOpenWorkspace = {
+                        navController.navigate(Routes.WORKSPACE)
+                    },
+                )
+            }
+            composable(Routes.WORKSPACE) {
+                WorkspaceRoute(
+                    viewModel = WorkspaceViewModel(graph.workspaceRepository),
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable(Routes.ONBOARDING) {

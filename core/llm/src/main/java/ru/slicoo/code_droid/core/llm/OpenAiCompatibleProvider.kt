@@ -33,6 +33,7 @@ class OpenAiCompatibleProvider(
         chatStream(request).collect { event ->
             when (event) {
                 is StreamEvent.TextDelta -> text.append(event.text)
+                is StreamEvent.ToolCall -> Unit
                 is StreamEvent.Error -> throw event.throwable
                 is StreamEvent.Usage -> Unit
                 StreamEvent.Done -> Unit
@@ -58,6 +59,8 @@ class OpenAiCompatibleProvider(
 
         val channel = response.bodyAsChannel()
         val pending = mutableListOf<String>()
+        // Tool calls stream in fragments; accumulate by index.
+        val toolCallAccumulator = mutableMapOf<Int, AccumulatedToolCall>()
         while (true) {
             val line = channel.readUTF8Line() ?: break
             if (line.isEmpty()) {
@@ -66,26 +69,53 @@ class OpenAiCompatibleProvider(
                 pending.clear()
                 if (data == null || SseParser.isDone(data)) continue
                 val chunk = Wire.decodeChunk(data) ?: continue
-                emitEvents(chunk)
+                emitEvents(chunk, toolCallAccumulator)
             } else {
                 pending += line
             }
+        }
+        // Flush accumulated tool calls after the stream ends.
+        for (call in toolCallAccumulator.values.sortedBy { it.index }) {
+            emit(
+                StreamEvent.ToolCall(
+                    callId = call.id ?: "call_${call.index}",
+                    name = call.name ?: "",
+                    arguments = call.arguments.toString(),
+                ),
+            )
         }
         emit(StreamEvent.Done)
     }
 
     private suspend fun kotlinx.coroutines.flow.FlowCollector<StreamEvent>.emitEvents(
         chunk: Wire.Chunk,
+        toolCallAccumulator: MutableMap<Int, AccumulatedToolCall>,
     ) {
         val delta = chunk.choices.firstOrNull()?.delta?.content
         if (!delta.isNullOrEmpty()) {
             emit(StreamEvent.TextDelta(delta))
+        }
+        chunk.choices.firstOrNull()?.delta?.toolCalls?.forEach { call ->
+            val acc = toolCallAccumulator.getOrPut(call.index) {
+                AccumulatedToolCall(index = call.index, id = call.id)
+            }
+            call.id?.let { acc.id = it }
+            call.function?.name?.let { acc.name = it }
+            call.function?.arguments?.let { acc.arguments.append(it) }
         }
         val usage = chunk.usage
         if (usage != null) {
             emit(StreamEvent.Usage(usage.promptTokens, usage.completionTokens))
         }
     }
+
+    /** Mutable accumulation state for one streamed tool call. */
+    private class AccumulatedToolCall(
+        val index: Int,
+        var id: String?,
+        var name: String? = null,
+        val arguments: StringBuilder = StringBuilder(),
+    )
 }
 
 /** HTTP-level failure carrying the provider's error payload, if any. */

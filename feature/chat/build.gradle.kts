@@ -16,5 +16,7 @@ dependencies {
     implementation(project(":core:llm"))
     implementation(project(":core:model"))
     implementation(project(":core:data"))
+    implementation(project(":core:agent"))
+    implementation(project(":core:workspace"))
     implementation(libs.androidx.lifecycle.viewmodel.compose)
 }

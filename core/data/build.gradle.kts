@@ -16,4 +16,5 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.okhttp)
+    implementation(project(":core:workspace"))
 }

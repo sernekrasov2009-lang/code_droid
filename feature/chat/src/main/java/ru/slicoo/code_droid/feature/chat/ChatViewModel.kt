@@ -7,14 +7,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import ru.slicoo.code_droid.core.agent.AgentEvent
+import ru.slicoo.code_droid.core.agent.AgentLoop
+import ru.slicoo.code_droid.core.agent.ToolApproval
+import ru.slicoo.code_droid.core.agent.WorkspaceTools
 import ru.slicoo.code_droid.core.data.ChatConfig
 import ru.slicoo.code_droid.core.llm.LlmHttpException
-import ru.slicoo.code_droid.core.llm.LlmProvider
-import ru.slicoo.code_droid.core.llm.LlmRequest
-import ru.slicoo.code_droid.core.llm.StreamEvent
 import ru.slicoo.code_droid.core.model.Message
 import ru.slicoo.code_droid.core.model.MessagePart
 import ru.slicoo.code_droid.core.model.Role
+import ru.slicoo.code_droid.core.workspace.WorkspaceManager
 import java.util.UUID
 
 data class ChatUiState(
@@ -23,16 +25,25 @@ data class ChatUiState(
     val isGenerating: Boolean = false,
     val error: String? = null,
     val needsKey: Boolean = false,
-    /** Human-readable label of the model currently in use, if configured. */
     val modelLabel: String? = null,
+    val workspaceLabel: String? = null,
+    /** Tool activity log for the current turn: name + status. */
+    val toolEvents: List<ToolEventUi> = emptyList(),
+)
+
+data class ToolEventUi(
+    val name: String,
+    val detail: String,
+    val isRunning: Boolean,
 )
 
 /**
- * Streams assistant replies into [ChatUiState], supports cancelling an
- * in-flight generation, and keeps the last error for the UI.
+ * Chat screen backend. Plain chat without a workspace; the agent loop with
+ * tools when a workspace is active.
  */
 class ChatViewModel(
     private val chatConfig: ChatConfig,
+    private val workspaceProvider: () -> WorkspaceManager?,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(refreshState(ChatUiState()))
@@ -46,11 +57,13 @@ class ChatViewModel(
 
     private fun refreshState(state: ChatUiState): ChatUiState {
         val setup = chatConfig.activeSetup()
+        val workspaceManager = workspaceProvider()
         return state.copy(
             modelLabel = setup?.let { (provider, account) ->
                 "${provider.name} · ${account.selectedModel}"
             },
             needsKey = setup == null,
+            workspaceLabel = workspaceManager?.rootPath?.name,
         )
     }
 
@@ -65,20 +78,11 @@ class ChatViewModel(
             )
             return
         }
-        val (provider, account) = setup
-        val llmProvider: LlmProvider = try {
-            chatConfig.currentProvider() ?: run {
-                _uiState.value = _uiState.value.copy(
-                    error = "Провайдер не настроен.",
-                    needsKey = true,
-                )
-                return
-            }
+        val (_, account) = setup
+        val llmProvider = try {
+            chatConfig.currentProvider() ?: return
         } catch (e: UnsupportedOperationException) {
-            _uiState.value = _uiState.value.copy(
-                error = e.message,
-                needsKey = false,
-            )
+            _uiState.value = _uiState.value.copy(error = e.message)
             return
         }
 
@@ -95,44 +99,57 @@ class ChatViewModel(
             isGenerating = true,
             error = null,
             needsKey = false,
+            toolEvents = emptyList(),
         )
 
         generationJob = viewModelScope.launch {
             val assistantText = StringBuilder()
             try {
-                llmProvider.chatStream(
-                    LlmRequest(
-                        model = account.selectedModel,
-                        messages = history,
-                    ),
-                ).collect { event ->
-                    when (event) {
-                        is StreamEvent.TextDelta -> {
-                            assistantText.append(event.text)
-                            _uiState.value = _uiState.value.copy(
-                                streamingText = assistantText.toString(),
-                            )
-                        }
-                        StreamEvent.Done -> Unit
-                        is StreamEvent.Usage -> Unit
-                        is StreamEvent.Error -> throw event.throwable
-                    }
-                }
-                if (assistantText.isNotEmpty()) {
-                    _uiState.value = _uiState.value.copy(
-                        messages = _uiState.value.messages + assistantMessage(assistantText.toString()),
-                        streamingText = null,
-                        isGenerating = false,
+                val workspaceManager = workspaceProvider()
+                val loop = if (workspaceManager != null) {
+                    AgentLoop(
+                        provider = llmProvider,
+                        tools = WorkspaceTools(workspaceManager),
+                        approval = autoApproval,
                     )
                 } else {
-                    _uiState.value = _uiState.value.copy(
-                        streamingText = null,
-                        isGenerating = false,
-                        error = "Пустой ответ от модели. Проверьте ключ и модель.",
-                    )
+                    null
                 }
+                val finalTranscript: List<Message>
+                if (loop != null) {
+                    finalTranscript = loop.run(account.selectedModel, history) { event ->
+                        applyAgentEvent(event, assistantText)
+                    }
+                } else {
+                    // Plain chat, no tools.
+                    llmProvider.chatStream(
+                        ru.slicoo.code_droid.core.llm.LlmRequest(
+                            model = account.selectedModel,
+                            messages = history,
+                        ),
+                    ).collect { event ->
+                        when (event) {
+                            is ru.slicoo.code_droid.core.llm.StreamEvent.TextDelta -> {
+                                assistantText.append(event.text)
+                                _uiState.value = _uiState.value.copy(
+                                    streamingText = assistantText.toString(),
+                                )
+                            }
+                            is ru.slicoo.code_droid.core.llm.StreamEvent.Error ->
+                                throw event.throwable
+                            else -> Unit
+                        }
+                    }
+                    finalTranscript = history + assistantMessage(assistantText.toString())
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    messages = finalTranscript,
+                    streamingText = null,
+                    isGenerating = false,
+                    toolEvents = emptyList(),
+                )
             } catch (e: kotlinx.coroutines.CancellationException) {
-                // User cancelled: keep whatever streamed so far.
                 val partial = assistantText.toString()
                 _uiState.value = _uiState.value.copy(
                     messages = if (partial.isEmpty()) _uiState.value.messages else
@@ -148,6 +165,46 @@ class ChatViewModel(
                     isGenerating = false,
                     error = errorMessage(e),
                 )
+            }
+        }
+    }
+
+    /** Auto-approve non-mutating tools; mutating ones ask the user later (Stage 3 UI). */
+    private val autoApproval = ToolApproval { _, _ -> true }
+
+    private fun applyAgentEvent(event: AgentEvent, assistantText: StringBuilder) {
+        when (event) {
+            is AgentEvent.TextDelta -> {
+                assistantText.append(event.text)
+                _uiState.value = _uiState.value.copy(
+                    streamingText = assistantText.toString(),
+                )
+            }
+            is AgentEvent.ToolStarted -> {
+                _uiState.value = _uiState.value.copy(
+                    toolEvents = _uiState.value.toolEvents + ToolEventUi(
+                        name = event.name,
+                        detail = event.arguments.take(120),
+                        isRunning = true,
+                    ),
+                )
+            }
+            is AgentEvent.ToolFinished -> {
+                _uiState.value = _uiState.value.copy(
+                    toolEvents = _uiState.value.toolEvents
+                        .filterNot { it.isRunning && it.name == event.name }
+                        .let {
+                            it + ToolEventUi(
+                                name = event.name,
+                                detail = event.result.take(200),
+                                isRunning = false,
+                            )
+                        },
+                )
+            }
+            is AgentEvent.Usage, is AgentEvent.TurnFinished -> Unit
+            is AgentEvent.Error -> {
+                _uiState.value = _uiState.value.copy(error = event.message)
             }
         }
     }

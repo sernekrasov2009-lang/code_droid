@@ -48,6 +48,7 @@ data class AppConfig(
     val providers: List<ProviderConfig> = emptyList(),
     val accounts: List<ProviderAccount> = emptyList(),
     val activeProviderId: String? = null,
+    val workspace: WorkspaceInfo? = null,
 ) {
     fun accountFor(providerId: String): ProviderAccount? =
         accounts.firstOrNull { it.providerId == providerId }
@@ -57,3 +58,13 @@ data class AppConfig(
 
     fun providerById(id: String): ProviderConfig? = providers.firstOrNull { it.id == id }
 }
+
+/** The active project folder the agent works in. */
+@Serializable
+data class WorkspaceInfo(
+    /** Persisted SAF tree URI, when the folder was picked via the system picker. */
+    val treeUri: String? = null,
+    /** Absolute filesystem path. Set for every workspace. */
+    val path: String,
+    val displayName: String,
+)

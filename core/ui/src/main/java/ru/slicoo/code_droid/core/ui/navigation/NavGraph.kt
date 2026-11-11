@@ -5,4 +5,5 @@ object Routes {
     const val HOME = "home"
     const val ONBOARDING = "onboarding"
     const val SETTINGS = "settings"
+    const val WORKSPACE = "workspace"
 }

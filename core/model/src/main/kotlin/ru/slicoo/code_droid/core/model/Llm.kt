@@ -10,6 +10,18 @@ enum class Role { SYSTEM, USER, ASSISTANT, TOOL }
 sealed interface MessagePart {
     @Serializable
     data class Text(val text: String) : MessagePart
+
+    /** A tool call requested by the assistant. */
+    @Serializable
+    data class ToolCall(val callId: String, val name: String, val arguments: String) : MessagePart
+
+    /** Result of a tool call, sent back to the model. */
+    @Serializable
+    data class ToolResult(
+        val callId: String,
+        val content: String,
+        val isError: Boolean = false,
+    ) : MessagePart
 }
 
 /** One message in a conversation. */
