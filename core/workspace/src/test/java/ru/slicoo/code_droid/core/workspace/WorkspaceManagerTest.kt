@@ -1,9 +1,9 @@
 package ru.slicoo.code_droid.core.workspace
 
 import java.io.File
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
+import org.junit.Test
 
 class WorkspaceManagerTest {
 
@@ -18,7 +18,7 @@ class WorkspaceManagerTest {
     @Test
     fun resolveRejectsTraversalOutsideRoot() {
         val manager = WorkspaceManager(tempRoot())
-        assertFailsWith<IllegalArgumentException> {
+        assertThrows(IllegalArgumentException::class.java) {
             manager.resolve("../escape.txt")
         }
     }
@@ -26,12 +26,12 @@ class WorkspaceManagerTest {
     @Test
     fun resolveRejectsAbsolutePathOutsideRoot() {
         val manager = WorkspaceManager(tempRoot())
-        assertFailsWith<IllegalArgumentException> {
+        assertThrows(IllegalArgumentException::class.java) {
             manager.resolve("C:/Windows/system32/config")
         }
     }
 
-    private fun tempRoot(): File = createTempDir(prefix = "ws-test").apply {
+    private fun tempRoot(): File = kotlin.io.path.createTempDirectory("ws-test").toFile().apply {
         resolve("nested").mkdirs()
     }
 }

@@ -14,12 +14,17 @@ class WorkspaceManager(private val root: File) {
 
     /** Resolves [relativePath] and verifies it stays inside the workspace root. */
     fun resolve(relativePath: String): File {
-        val target = File(root, relativePath)
-        val canonicalRoot = root.canonicalFile
-        val canonicalTarget = target.canonicalFile
+        val canonicalRoot = root.canonicalFile.toPath()
+        val target = File(root, relativePath).absoluteFile.toPath().normalize()
+        require(target == canonicalRoot || target.startsWith(canonicalRoot)) {
+            "Path escapes workspace root: $relativePath"
+        }
+        // Canonicalize only after the path is proven to stay inside the root,
+        // so symlinks leading outside are still caught by this check.
+        val canonicalTarget = target.toFile().canonicalFile.toPath()
         require(canonicalTarget == canonicalRoot || canonicalTarget.startsWith(canonicalRoot)) {
             "Path escapes workspace root: $relativePath"
         }
-        return canonicalTarget
+        return canonicalTarget.toFile()
     }
 }
