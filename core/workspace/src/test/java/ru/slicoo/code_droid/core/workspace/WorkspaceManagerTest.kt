@@ -25,9 +25,14 @@ class WorkspaceManagerTest {
 
     @Test
     fun resolveRejectsAbsolutePathOutsideRoot() {
-        val manager = WorkspaceManager(tempRoot())
+        // A truly absolute path on the current platform, guaranteed outside
+        // any temp directory: drive-rooted on Windows, slash-rooted on Unix.
+        val root = tempRoot()
+        val manager = WorkspaceManager(root)
+        val outside = root.canonicalFile.toPath().root!!
+            .resolve("definitely-outside.txt").toFile().path
         assertThrows(IllegalArgumentException::class.java) {
-            manager.resolve("C:/Windows/system32/config")
+            manager.resolve(outside)
         }
     }
 
