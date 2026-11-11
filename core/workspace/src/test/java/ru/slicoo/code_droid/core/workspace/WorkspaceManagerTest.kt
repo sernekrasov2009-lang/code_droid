@@ -17,9 +17,14 @@ class WorkspaceManagerTest {
 
     @Test
     fun resolveRejectsTraversalOutsideRoot() {
-        val manager = WorkspaceManager(tempRoot())
+        // Build a sibling of the workspace root and escape into it via "..",
+        // so the test does not depend on temp-dir layout or OS quirks.
+        val parent = kotlin.io.path.createTempDirectory("ws-parent").toFile()
+        val root = File(parent, "ws-root").apply { mkdirs() }
+        File(parent, "sibling.txt").createNewFile()
+        val manager = WorkspaceManager(root)
         assertThrows(IllegalArgumentException::class.java) {
-            manager.resolve("../escape.txt")
+            manager.resolve("../sibling.txt")
         }
     }
 
