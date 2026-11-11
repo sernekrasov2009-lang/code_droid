@@ -35,14 +35,21 @@ fun CodeDroidApp() {
             )
         }
         val navController = rememberNavController()
+        // First launch without a saved key starts at onboarding.
+        val hasKey = remember(context) {
+            !SharedPrefsApiKeyStore(context).read().isNullOrBlank()
+        }
 
         NavHost(
             navController = navController,
-            startDestination = Routes.HOME,
+            startDestination = if (hasKey) Routes.HOME else Routes.ONBOARDING,
         ) {
             composable(Routes.HOME) {
                 ChatRoute(
                     viewModel = graph.chatViewModelCreator(),
+                    onEnterKey = {
+                        navController.navigate(Routes.ONBOARDING)
+                    },
                 )
             }
             composable(Routes.ONBOARDING) {

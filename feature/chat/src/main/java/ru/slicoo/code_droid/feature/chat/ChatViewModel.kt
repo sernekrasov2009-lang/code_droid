@@ -22,6 +22,7 @@ data class ChatUiState(
     val streamingText: String? = null,
     val isGenerating: Boolean = false,
     val error: String? = null,
+    val needsKey: Boolean = false,
 )
 
 /**
@@ -43,7 +44,8 @@ class ChatViewModel(
         val provider = chatConfig.currentProvider()
         if (provider == null) {
             _uiState.value = _uiState.value.copy(
-                error = "API-ключ не задан. Откройте настройки, чтобы ввести его.",
+                error = "API-ключ не задан.",
+                needsKey = true,
             )
             return
         }
@@ -60,6 +62,7 @@ class ChatViewModel(
             streamingText = "",
             isGenerating = true,
             error = null,
+            needsKey = false,
         )
 
         generationJob = viewModelScope.launch {
@@ -127,7 +130,7 @@ class ChatViewModel(
     }
 
     fun dismissError() {
-        _uiState.value = _uiState.value.copy(error = null)
+        _uiState.value = _uiState.value.copy(error = null, needsKey = false)
     }
 
     private suspend fun streamResponse(

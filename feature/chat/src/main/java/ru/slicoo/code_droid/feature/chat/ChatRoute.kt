@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +40,7 @@ import ru.slicoo.code_droid.core.model.Role
 @Composable
 fun ChatRoute(
     viewModel: ChatViewModel,
+    onEnterKey: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
@@ -60,6 +62,7 @@ fun ChatRoute(
             onSend = viewModel::send,
             onCancel = viewModel::cancel,
             onDismissError = viewModel::dismissError,
+            onEnterKey = onEnterKey,
             modifier = Modifier.padding(padding),
         )
     }
@@ -72,6 +75,7 @@ fun ChatScreen(
     onSend: (String) -> Unit,
     onCancel: () -> Unit,
     onDismissError: () -> Unit,
+    onEnterKey: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var input by remember { mutableStateOf("") }
@@ -105,19 +109,12 @@ fun ChatScreen(
             }
             if (state.error != null) {
                 item(key = "error") {
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = onDismissError,
-                    ) {
-                        Text(
-                            state.error ?: "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.padding(12.dp),
-                        )
-                    }
+                    ErrorPanel(
+                        message = state.error ?: "",
+                        needsKey = state.needsKey,
+                        onDismissError = onDismissError,
+                        onEnterKey = onEnterKey,
+                    )
                 }
             }
         }
@@ -148,6 +145,36 @@ fun ChatScreen(
                     }
                 }) {
                     Text("→")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ErrorPanel(
+    message: String,
+    needsKey: Boolean,
+    onDismissError: () -> Unit,
+    onEnterKey: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            if (needsKey) {
+                Button(
+                    onClick = onEnterKey,
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    Text("Ввести API-ключ")
                 }
             }
         }
