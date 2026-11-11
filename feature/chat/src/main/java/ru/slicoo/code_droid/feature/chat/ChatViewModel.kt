@@ -23,29 +23,61 @@ data class ChatUiState(
     val isGenerating: Boolean = false,
     val error: String? = null,
     val needsKey: Boolean = false,
+    /** Human-readable label of the model currently in use, if configured. */
+    val modelLabel: String? = null,
 )
 
 /**
- * Stage-1 chat: streams assistant replies into [ChatUiState], supports
- * cancelling an in-flight generation, and keeps the last error for the UI.
+ * Streams assistant replies into [ChatUiState], supports cancelling an
+ * in-flight generation, and keeps the last error for the UI.
  */
 class ChatViewModel(
     private val chatConfig: ChatConfig,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ChatUiState())
+    private val _uiState = MutableStateFlow(refreshState(ChatUiState()))
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     private var generationJob: Job? = null
 
+    fun refresh() {
+        _uiState.value = refreshState(_uiState.value)
+    }
+
+    private fun refreshState(state: ChatUiState): ChatUiState {
+        val setup = chatConfig.activeSetup()
+        return state.copy(
+            modelLabel = setup?.let { (provider, account) ->
+                "${provider.name} · ${account.selectedModel}"
+            },
+            needsKey = setup == null,
+        )
+    }
+
     fun send(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || _uiState.value.isGenerating) return
-        val provider = chatConfig.currentProvider()
-        if (provider == null) {
+        val setup = chatConfig.activeSetup()
+        if (setup == null) {
             _uiState.value = _uiState.value.copy(
-                error = "API-ключ не задан.",
+                error = "Провайдер не настроен: выберите его и введите API-ключ.",
                 needsKey = true,
+            )
+            return
+        }
+        val (provider, account) = setup
+        val llmProvider: LlmProvider = try {
+            chatConfig.currentProvider() ?: run {
+                _uiState.value = _uiState.value.copy(
+                    error = "Провайдер не настроен.",
+                    needsKey = true,
+                )
+                return
+            }
+        } catch (e: UnsupportedOperationException) {
+            _uiState.value = _uiState.value.copy(
+                error = e.message,
+                needsKey = false,
             )
             return
         }
@@ -68,7 +100,12 @@ class ChatViewModel(
         generationJob = viewModelScope.launch {
             val assistantText = StringBuilder()
             try {
-                streamResponse(provider, history).collect { event ->
+                llmProvider.chatStream(
+                    LlmRequest(
+                        model = account.selectedModel,
+                        messages = history,
+                    ),
+                ).collect { event ->
                     when (event) {
                         is StreamEvent.TextDelta -> {
                             assistantText.append(event.text)
@@ -83,12 +120,7 @@ class ChatViewModel(
                 }
                 if (assistantText.isNotEmpty()) {
                     _uiState.value = _uiState.value.copy(
-                        messages = _uiState.value.messages + Message(
-                            id = UUID.randomUUID().toString(),
-                            role = Role.ASSISTANT,
-                            parts = listOf(MessagePart.Text(assistantText.toString())),
-                            createdAt = System.currentTimeMillis(),
-                        ),
+                        messages = _uiState.value.messages + assistantMessage(assistantText.toString()),
                         streamingText = null,
                         isGenerating = false,
                     )
@@ -104,12 +136,7 @@ class ChatViewModel(
                 val partial = assistantText.toString()
                 _uiState.value = _uiState.value.copy(
                     messages = if (partial.isEmpty()) _uiState.value.messages else
-                        _uiState.value.messages + Message(
-                            id = UUID.randomUUID().toString(),
-                            role = Role.ASSISTANT,
-                            parts = listOf(MessagePart.Text(partial)),
-                            createdAt = System.currentTimeMillis(),
-                        ),
+                        _uiState.value.messages + assistantMessage(partial),
                     streamingText = null,
                     isGenerating = false,
                     error = null,
@@ -125,6 +152,13 @@ class ChatViewModel(
         }
     }
 
+    private fun assistantMessage(text: String) = Message(
+        id = UUID.randomUUID().toString(),
+        role = Role.ASSISTANT,
+        parts = listOf(MessagePart.Text(text)),
+        createdAt = System.currentTimeMillis(),
+    )
+
     fun cancel() {
         generationJob?.cancel()
     }
@@ -133,20 +167,11 @@ class ChatViewModel(
         _uiState.value = _uiState.value.copy(error = null, needsKey = false)
     }
 
-    private suspend fun streamResponse(
-        provider: LlmProvider,
-        history: List<Message>,
-    ) = provider.chatStream(
-        LlmRequest(
-            model = chatConfig.defaultModel,
-            messages = history,
-        ),
-    )
-
     private fun errorMessage(e: Throwable): String = when (e) {
         is LlmHttpException -> when (e.statusCode) {
-            401, 403 -> "API-ключ неверен или lacks доступа (HTTP ${e.statusCode})."
+            401, 403 -> "API-ключ неверен или без доступа (HTTP ${e.statusCode})."
             429 -> "Лимит запросов исчерпан (HTTP 429). Попробуйте позже."
+            400 -> "Запрос отклонён (HTTP 400). Возможно, неверное имя модели."
             else -> "Ошибка провайдера: HTTP ${e.statusCode}."
         }
         is java.net.UnknownHostException -> "Нет соединения с сервером. Проверьте сеть."

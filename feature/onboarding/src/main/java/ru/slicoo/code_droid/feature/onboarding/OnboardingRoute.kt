@@ -2,14 +2,18 @@ package ru.slicoo.code_droid.feature.onboarding
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -29,63 +33,56 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import ru.slicoo.code_droid.core.data.ApiKeyStore
+import ru.slicoo.code_droid.core.data.AppConfigRepository
 import ru.slicoo.code_droid.core.data.ChatConfig
 import ru.slicoo.code_droid.core.llm.LlmHttpException
-import ru.slicoo.code_droid.core.llm.LlmRequest
-import ru.slicoo.code_droid.core.llm.StreamEvent
-import ru.slicoo.code_droid.core.model.Message
-import ru.slicoo.code_droid.core.model.MessagePart
-import ru.slicoo.code_droid.core.model.Role
+import ru.slicoo.code_droid.core.model.ProviderConfig
 
 data class OnboardingUiState(
+    val providers: List<ProviderConfig> = emptyList(),
+    val providerId: String? = null,
     val apiKey: String = "",
     val isChecking: Boolean = false,
     val error: String? = null,
-    val alreadyHasKey: Boolean = false,
 )
 
 class OnboardingViewModel(
-    private val keyStore: ApiKeyStore,
+    private val repository: AppConfigRepository,
     private val chatConfig: ChatConfig,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(OnboardingUiState(alreadyHasKey = keyStore.read() != null))
+    private val _uiState = MutableStateFlow(initialState())
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
+
+    private fun initialState(): OnboardingUiState {
+        val config = repository.load()
+        return OnboardingUiState(
+            providers = config.providers,
+            providerId = config.providers.firstOrNull()?.id,
+        )
+    }
+
+    fun onProviderChange(provider: ProviderConfig) {
+        _uiState.value = _uiState.value.copy(providerId = provider.id, error = null)
+    }
 
     fun onApiKeyChange(value: String) {
         _uiState.value = _uiState.value.copy(apiKey = value, error = null)
     }
 
     fun checkAndSave() {
-        val key = _uiState.value.apiKey.trim()
-        if (key.isEmpty() || _uiState.value.isChecking) return
-        _uiState.value = _uiState.value.copy(isChecking = true, error = null)
+        val state = _uiState.value
+        val key = state.apiKey.trim()
+        val provider = state.providers.firstOrNull { it.id == state.providerId } ?: return
+        if (key.isEmpty() || state.isChecking) return
+        _uiState.value = state.copy(isChecking = true, error = null)
 
         viewModelScope.launch {
             try {
-                // Minimal request: 1 token proves both the key and reachability.
-                val probe = LlmRequest(
-                    model = chatConfig.defaultModel,
-                    messages = listOf(
-                        Message(
-                            id = "probe",
-                            role = Role.USER,
-                            parts = listOf(MessagePart.Text("ping")),
-                            createdAt = System.currentTimeMillis(),
-                        ),
-                    ),
-                )
-                var gotText = false
-                chatConfig.providerFor(key).chatStream(probe).collect { event ->
-                    if (event is StreamEvent.TextDelta && event.text.isNotEmpty()) {
-                        gotText = true
-                    }
-                }
-                if (!gotText) {
-                    throw LlmHttpException(200, "empty response")
-                }
-                keyStore.write(key)
+                // A /models call proves key and reachability in one cheap request.
+                chatConfig.modelCatalog.fetchOpenAiCompatible(provider.baseUrl, key)
+                repository.writeApiKey(provider.id, key)
+                repository.setActiveProvider(provider.id)
                 _uiState.value = _uiState.value.copy(isChecking = false)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -119,6 +116,7 @@ fun OnboardingRoute(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -128,14 +126,27 @@ fun OnboardingRoute(
             "AI-среда разработки на Android",
             style = MaterialTheme.typography.bodyMedium,
         )
+
+        Text(
+            "Выберите провайдера",
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 24.dp, bottom = 8.dp),
+        )
+        FlowChips(
+            providers = state.providers,
+            selectedId = state.providerId,
+            onSelect = viewModel::onProviderChange,
+        )
+
         OutlinedTextField(
             value = state.apiKey,
             onValueChange = viewModel::onApiKeyChange,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 24.dp),
+                .padding(top = 16.dp),
             label = { Text("API-ключ") },
-            placeholder = { Text("sk-…") },
             isError = state.error != null,
             singleLine = true,
             visualTransformation = if (state.apiKey.isEmpty()) {
@@ -172,7 +183,30 @@ fun OnboardingRoute(
             }
         }
         TextButton(onClick = onDone) {
-            Text("Пропустить")
+            Text("Пропустить и настроить позже")
+        }
+    }
+}
+
+/** Chip list of providers, two-column rows to keep it compact. */
+@Composable
+private fun FlowChips(
+    providers: List<ProviderConfig>,
+    selectedId: String?,
+    onSelect: (ProviderConfig) -> Unit,
+) {
+    providers.chunked(2).forEach { rowProviders ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            rowProviders.forEach { provider ->
+                FilterChip(
+                    selected = selectedId == provider.id,
+                    onClick = { onSelect(provider) },
+                    label = { Text(provider.name, maxLines = 1) },
+                )
+            }
         }
     }
 }

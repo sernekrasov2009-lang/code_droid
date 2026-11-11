@@ -13,4 +13,8 @@ android {
 
 dependencies {
     implementation(project(":core:ui"))
+    implementation(project(":core:data"))
+    implementation(project(":core:llm"))
+    implementation(project(":core:model"))
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
 }

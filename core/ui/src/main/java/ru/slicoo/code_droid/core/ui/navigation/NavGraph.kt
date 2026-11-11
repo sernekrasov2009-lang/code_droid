@@ -4,4 +4,5 @@ package ru.slicoo.code_droid.core.ui.navigation
 object Routes {
     const val HOME = "home"
     const val ONBOARDING = "onboarding"
+    const val SETTINGS = "settings"
 }

@@ -21,6 +21,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -53,18 +54,33 @@ fun ChatRoute(
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Code Droid") })
+            TopAppBar(
+                title = { Text("Code Droid") },
+                actions = {
+                    TextButton(onClick = onEnterKey) { Text("Настройки") }
+                },
+            )
         },
     ) { padding ->
-        ChatScreen(
-            state = state,
-            listState = listState,
-            onSend = viewModel::send,
-            onCancel = viewModel::cancel,
-            onDismissError = viewModel::dismissError,
-            onEnterKey = onEnterKey,
-            modifier = Modifier.padding(padding),
-        )
+        Column(modifier = Modifier.padding(padding)) {
+            ChatScreen(
+                state = state,
+                listState = listState,
+                onSend = viewModel::send,
+                onCancel = viewModel::cancel,
+                onDismissError = viewModel::dismissError,
+                onEnterKey = onEnterKey,
+                modifier = Modifier.weight(1f),
+            )
+            state.modelLabel?.let { label ->
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                )
+            }
+        }
     }
 }
 

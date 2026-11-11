@@ -35,6 +35,7 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":feature:chat"))
     implementation(project(":feature:onboarding"))
+    implementation(project(":feature:settings"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
